@@ -23,11 +23,8 @@ CODE_OBJECTS=\
 	./obj/printing_functions.o \
 	./obj/search_for.o	\
 	./obj/vector_utilities.o \
-	./obj/oleg.o \
-	./obj/mc.o \
 	./obj/mc_finite_D.o \
 	./obj/mc_pyrochlore.o \
-	./obj/mc_sphere.o \
 	
 	BIT_FORMAT_STR=64	
 
