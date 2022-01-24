@@ -1,0 +1,471 @@
+#include"mc_finite_D.h"
+#include"printing_functions.h"
+using namespace std;
+
+void normalize(std::vector<double> &vec)
+{
+
+	double norm=0;
+	int size=vec.size();
+	for (int i=0;i<size;i++) norm=norm+(vec[i]*vec[i]);
+	norm=1.0/sqrt(norm);
+	for (int i=0;i<size;i++) vec[i]=(vec[i]*norm);
+
+}
+
+void random_move_continuous_spin(double &valx,double &valy, double &valz)
+{
+	bool cond=false;
+	// Choose a completely random direction on the sphere - This is INEFFICENT at low temps
+	while (cond==false)
+	{
+		valx=2*uniform_rnd() - 1;	
+		valy=2*uniform_rnd() - 1;	
+		valz=2*uniform_rnd() - 1;
+		if (valx*valx + valy*valy + valz*valz <=1) cond=true; 
+	}
+}
+
+void conical_move_continuous_spin(double r_max, double x, double y, double z, double &valx, double &valy, double &valz)
+{
+	// Instead we want to choose something CLOSE to the direction we have
+	// It should not be too close either 
+	bool cond=false;
+	std::vector<double> d1vec(3),d2vec(3);
+	double d1,d2;
+	while (cond==false)
+	{
+		d1=r_max*(2*uniform_rnd() - 1);	
+		d2=r_max*(2*uniform_rnd() - 1);	
+		if (d1*d1 + d2*d2 <=(r_max*r_max)) cond=true; 
+	}
+
+	if (abs(x)>1.0e-16 and abs(z)>1.0e-16 and abs(y)>1.0e-16)
+	{
+		d1vec[0]=-y;
+		d1vec[1]=x;
+		d1vec[2]=0.0;
+		d2vec[0]=1.0;
+		d2vec[1]=(y/x);
+		d2vec[2]=(-(x/z) - (y*y/(x*z)));
+	}
+	else if (abs(y)>1.0e-16 and abs(z)>1.0e-16 and abs(x)<1.0e-16)
+	{
+		d1vec[0]=1.0;
+		d1vec[1]=0.0;
+		d1vec[2]=0.0;
+		d2vec[0]=0.0;
+		d2vec[1]=z;
+		d2vec[2]=-y;
+	}
+	else if (abs(x)>1.0e-16 and abs(z)>1.0e-16 and abs(y)<1.0e-16)
+	{
+		d1vec[0]=0.0;
+		d1vec[1]=1.0;
+		d1vec[2]=0.0;
+		d2vec[0]=z;
+		d2vec[1]=0.0;
+		d2vec[2]=-x;
+	}
+	else if (abs(x)>1.0e-16 and abs(y)>1.0e-16 and abs(z)<1.0e-16)
+	{
+		d1vec[0]=0.0;
+		d1vec[1]=0.0;
+		d1vec[2]=1.0;
+		d2vec[0]=y;
+		d2vec[1]=-x;
+		d2vec[2]=0.0;
+	}
+	else if (abs(x)<1.0e-16 and abs(y)<1.0e-16 and abs(z)>1.0e-16)
+	{
+		d1vec[0]=1.0;
+		d1vec[1]=0.0;
+		d1vec[2]=0.0;
+		d2vec[0]=0.0;
+		d2vec[1]=1.0;
+		d2vec[2]=0.0;
+	}
+	else if (abs(x)<1.0e-16 and abs(z)<1.0e-16 and abs(y)>1.0e-16)
+	{
+		d1vec[0]=1.0;
+		d1vec[1]=0.0;
+		d1vec[2]=0.0;
+		d2vec[0]=0.0;
+		d2vec[1]=0.0;
+		d2vec[2]=1.0;
+	}
+	else if (abs(y)<1.0e-16 and abs(z)<1.0e-16 and abs(x)>1.0e-16)
+	{
+		d1vec[0]=0.0;
+		d1vec[1]=1.0;
+		d1vec[2]=0.0;
+		d2vec[0]=0.0;
+		d2vec[1]=0.0;
+		d2vec[2]=1.0;
+	}
+	normalize(d1vec);
+	normalize(d2vec);
+
+	valx=x+(d1*d1vec[0])+(d2*d2vec[0]);	
+	valy=y+(d1*d1vec[1])+(d2*d2vec[1]);	
+	valz=z+(d1*d1vec[2])+(d2*d2vec[2]);	
+}
+
+double local_j_energy(int i, std::vector<double> &configx, std::vector<double> &configy, std::vector<double> &configz, 
+		      std::vector< std::vector<int> > &neighbors)
+{
+	double e=0;
+	for (int j=0;j<neighbors[i].size();j++)
+	{
+		int k=neighbors[i][j];
+		e=e-(configx[i]*configx[k]);
+		e=e-(configy[i]*configy[k]);
+		e=e-(configz[i]*configz[k]);
+	}
+	return e; // Pairs only counted once 
+}
+
+
+double total_j_energy(std::vector<double> &configx, std::vector<double> &configy, std::vector<double> &configz, 
+		      std::vector< std::vector<int> > &neighbors)
+{
+	double e=0;
+	for (int i=0;i<neighbors.size();i++)
+	{
+		for (int j=0;j<neighbors[i].size();j++)
+		{
+			int k=neighbors[i][j];
+			e=e-(configx[i]*configx[k]);
+			e=e-(configy[i]*configy[k]);
+			e=e-(configz[i]*configz[k]);
+		}
+	}
+	return e/2;  // Pairs counted twice so divide by 2
+}
+
+std::vector<double> total_magnetization(std::vector<double> &configx, 
+					std::vector<double> &configy, 
+					std::vector<double> &configz)
+{
+	double mx=0;
+	double my=0;
+	double mz=0;
+	std::vector<double> m;
+	for (int i=0;i<configx.size();i++)
+	{
+		mx+=configx[i];
+		my+=configy[i];
+		mz+=configz[i];
+	}
+	m.push_back(mx);
+	m.push_back(my);
+	m.push_back(mz);
+	return m;
+}
+
+void make_111_config(int Lx,int Ly,int Lz, std::vector<double> &configx, std::vector<double> &configy, std::vector<double> &configz)
+{	
+	int nsites=Lx*Ly*Lz;
+	configx.resize(nsites);
+	configy.resize(nsites);
+	configz.resize(nsites);
+	for (int i=0;i<nsites;i++) 
+	{
+		double a=1.0;
+		double b=1.0;
+		double c=1.0;
+		double norm=sqrt((a*a)+(b*b)+(c*c));
+		configx[i]=a/norm;
+		configy[i]=b/norm;
+		configz[i]=c/norm;
+	}
+}
+
+void make_x_config(int Lx,int Ly,int Lz, std::vector<double> &configx, std::vector<double> &configy, std::vector<double> &configz)
+{	
+	int nsites=Lx*Ly*Lz;
+	configx.resize(nsites);
+	configy.resize(nsites);
+	configz.resize(nsites);
+	for (int i=0;i<nsites;i++) 
+	{
+		double a=1.0;
+		double b=0.0;
+		double c=0.0;
+		double norm=sqrt((a*a)+(b*b)+(c*c));
+		configx[i]=a/norm;
+		configy[i]=b/norm;
+		configz[i]=c/norm;
+	}
+}
+
+
+void make_random_config(int Lx,int Ly,int Lz, std::vector<double> &configx, std::vector<double> &configy, std::vector<double> &configz)
+{	
+	int nsites=Lx*Ly*Lz;
+	configx.resize(nsites);
+	configy.resize(nsites);
+	configz.resize(nsites);
+	for (int i=0;i<nsites;i++) 
+	{
+		double a=2*uniform_rnd() - 1;
+		double b=2*uniform_rnd() - 1;
+		double c=2*uniform_rnd() - 1;
+		double norm=sqrt((a*a)+(b*b)+(c*c));
+		configx[i]=a/norm;
+		configy[i]=b/norm;
+		configz[i]=c/norm;
+	}
+}
+
+void get_neighbor2(int Lx,int Ly, int Lz, string direction, int x, int y, int z, int &xnew, int &ynew, int &znew, int &c)
+{
+	xnew=x;
+	ynew=y;
+	znew=z;
+
+	if (direction=="+x") xnew=(x+1)%Lx;
+	if (direction=="-x") xnew=(x-1+Lx)%Lx;
+	if (direction=="+y") ynew=(y+1)%Ly;
+	if (direction=="-y") ynew=(y-1+Ly)%Ly;
+	if (direction=="+z") znew=(z+1)%Lz;
+	if (direction=="-z") znew=(z-1+Lz)%Lz;
+
+	c=(Ly*Lz*xnew) + (Lz*ynew) + znew;
+
+}
+	
+void mc_finite_D(int L, string start_config, string mcmove, double temp, double hx, double hy, double hz, double D,
+	double & eavg, 
+	double &mxavg, double &myavg, double &mzavg, double &e2avg, 
+	double &mx2avg, double &my2avg, double &mz2avg)
+{
+	std::vector<double> ehistory;
+	double e4avg,mx4avg,my4avg,mz4avg;
+	double beta_final=1.0/temp;
+	double beta_initial=0.0;
+	// LxLxL pbc lattice
+	int nsamples=1000000000;
+	int nburn=10000000;
+	double beta_steps=(beta_final-beta_initial)/nburn;
+	//int nsamples=1000000;
+	//int nburn=1000;
+	int nsites=L*L*L;
+	std::vector<int> magnetizations(nsites);
+	std::vector< std::vector<int> > neighbors(nsites);	
+
+	// Make neighbors
+	for (int i=0;i<nsites;i++)
+	{
+		int x=i/(L*L);
+		int y = (i - (x*L*L))/L;
+		int z= (i-(x*L*L)-(y*L));
+		int xnew1,xnew2,xnew3,xnew4,xnew5,xnew6;
+		int ynew1,ynew2,ynew3,ynew4,ynew5,ynew6;
+		int znew1,znew2,znew3,znew4,znew5,znew6;
+		int c1,c2,c3,c4,c5,c6;
+
+		get_neighbor2(L,L,L,"+x",x,y,z,xnew1,ynew1,znew1,c1);
+		//cout<<"+x "<<xnew1<<"  "<<ynew1<<"  "<<znew1<<"  "<<c1<<endl;	
+		get_neighbor2(L,L,L,"-x",x,y,z,xnew2,ynew2,znew2,c2);	
+		//cout<<"-x "<<xnew2<<"  "<<ynew2<<"  "<<znew2<<"  "<<c2<<endl;	
+		get_neighbor2(L,L,L,"+y",x,y,z,xnew3,ynew3,znew3,c3);	
+		//cout<<"+y "<<xnew3<<"  "<<ynew3<<"  "<<znew3<<"  "<<c3<<endl;	
+		get_neighbor2(L,L,L,"-y",x,y,z,xnew4,ynew4,znew4,c4);	
+		//cout<<"-y "<<xnew4<<"  "<<ynew4<<"  "<<znew4<<"  "<<c4<<endl;	
+		get_neighbor2(L,L,L,"+z",x,y,z,xnew5,ynew5,znew5,c5);	
+		//cout<<"+z "<<xnew5<<"  "<<ynew5<<"  "<<znew5<<"  "<<c5<<endl;	
+		get_neighbor2(L,L,L,"-z",x,y,z,xnew6,ynew6,znew6,c6);	
+		//cout<<"-z "<<xnew6<<"  "<<ynew6<<"  "<<znew6<<"  "<<c6<<endl;	
+
+		neighbors[i].push_back(c1);
+		neighbors[i].push_back(c2);
+		neighbors[i].push_back(c3);
+		neighbors[i].push_back(c4);
+		neighbors[i].push_back(c5);
+		neighbors[i].push_back(c6);
+	}
+
+	cout<<endl;
+	// Make random configuration 
+	std::vector<double> configx,configy,configz;	
+	std::vector<double> newconfigx(nsites),newconfigy(nsites),newconfigz(nsites);
+	if (start_config=="random") make_random_config(L,L,L,configx,configy,configz); 
+	if (start_config=="111")    make_111_config(L,L,L,configx,configy,configz); 
+	if (start_config=="x")      make_x_config(L,L,L,configx,configy,configz); 
+
+	std::vector<double> magnetization=total_magnetization(configx,configy,configz);
+	//print_vec_acc(magnetization,true);
+	double energy=total_j_energy(configx,configy,configz,neighbors);
+	cout<<"Total j energy ="<<energy<<endl;
+	energy=energy-(hx*magnetization[0])-(hy*magnetization[1])-(hz*magnetization[2]); // Mag energy
+	cout<<"Total j energy + total h energy ="<<energy<<endl;
+	for (int i=0;i<nsites;i++) energy=energy-D*pow(configx[i],4.0)-D*pow(configy[i],4.0)-D*pow(configz[i],4.0);
+	cout<<"Total j energy + total h + D energy ="<<energy<<endl;
+	// energy
+	// magnetization 
+	double mx=magnetization[0];
+	double my=magnetization[1];
+	double mz=magnetization[2];
+	double etot=0.0;
+	double e2tot=0.0;
+	double e4tot=0.0;
+	double mxtot=0.0;
+	double mytot=0.0;
+	double mztot=0.0;
+	double mx2tot=0.0;
+	double my2tot=0.0;
+	double mz2tot=0.0;
+	double mx4tot=0.0;
+	double my4tot=0.0;
+	double mz4tot=0.0;
+	double accept=0.0;
+	double reject=0.0;
+	//ehistory.push_back(energy);
+	// Accept reject Metropolis
+	for (int i=0; i<(nsamples+nburn);i++)
+	{
+		// Choose random site
+		int site=uniform_rand_int(0,nsites);
+		double valx,valy,valz;
+		// Initialize the new configuration
+		newconfigx=configx;
+		newconfigy=configy;
+		newconfigz=configz;
+		double x=configx[site];		
+		double y=configy[site];		
+		double z=configz[site];		
+	
+		// Choose a completely random direction - This is INEFFICENT at low temps
+		if (mcmove=="random")  random_move_continuous_spin(valx,valy,valz);
+		// Instead we want to choose something CLOSE to the direction we have
+		// It should not be too close either 
+		if (mcmove=="conical") conical_move_continuous_spin(0.3,x,y,z,valx,valy,valz);
+		
+		//if (i%2==0)  random_move_continuous_spin(valx,valy,valz);
+		//random_move_continuous_spin(valx,valy,valz);
+		// Instead we want to choose something CLOSE to the direction we have
+		// It should not be too close either 
+		//else conical_move_continuous_spin(0.3,x,y,z,valx,valy,valz);
+		//conical_move_continuous_spin(0.3,x,y,z,valx,valy,valz);
+
+
+		// Normalize new direction
+		double norm=sqrt(valx*valx + valy*valy + valz*valz); 
+		newconfigx[site]=valx/norm;
+		newconfigy[site]=valy/norm;
+		newconfigz[site]=valz/norm;
+
+		// Calculate local energy of old and new configs
+		double local_energy1=local_j_energy(site,configx,configy,configz,neighbors);
+		double local_energy2=local_j_energy(site,newconfigx,newconfigy,newconfigz,neighbors);
+
+		// Calculate difference of magnetization 
+		double mxdiff=newconfigx[site]-configx[site];
+		double mydiff=newconfigy[site]-configy[site];
+		double mzdiff=newconfigz[site]-configz[site];
+		double mx4diff=pow(newconfigx[site],4)-pow(configx[site],4);
+		double my4diff=pow(newconfigy[site],4)-pow(configy[site],4);
+		double mz4diff=pow(newconfigz[site],4)-pow(configz[site],4);
+		double mnewx=mx+mxdiff;
+		double mnewy=my+mydiff;
+		double mnewz=mz+mzdiff;
+				// hterms                               // D terms                              // local j energy
+		double ediff=(-hx*mxdiff)+(-hy*mydiff)+(-hz*mzdiff)+(-D*mx4diff)+(-D*my4diff)+(-D*mz4diff)+(local_energy2-local_energy1);
+		double beta;
+		if (start_config=="random") 
+		{
+			beta=min(beta_final,i*beta_steps); // Gradually cool from infinite temp if start config is random
+		}
+		else       // if ordered phase then dont cool but let the temperature play its role
+		{
+			beta=beta_final;                  
+		}
+		//cout<<"Beta = "<<beta<<endl;
+		double prob=exp(-beta*ediff);
+		double rand=uniform_rnd();
+		if (rand<prob) // Accept
+		{
+			accept=accept+1;
+			// Reset configs to new configs, because accepted
+			configx=newconfigx;
+			configy=newconfigy;
+			configz=newconfigz;
+			double enew=energy+ediff;
+						     // 1 sweep = Nsite moves
+			if (i>nburn and i%nsites==0) // Update averages - after 1 sweep 
+			{
+				etot=etot+enew;
+				e2tot=e2tot+pow(enew,2.0);
+				e4tot=e4tot+pow(enew,4.0);
+				mxtot=mxtot+mnewx;
+				mytot=mytot+mnewy;
+				mztot=mztot+mnewz;
+				mx2tot=mx2tot+pow(mnewx,2.0);
+				my2tot=my2tot+pow(mnewy,2.0);
+				mz2tot=mz2tot+pow(mnewz,2.0);
+				mx4tot=mx4tot+pow(mnewx,4.0);
+				my4tot=my4tot+pow(mnewy,4.0);
+				mz4tot=mz4tot+pow(mnewz,4.0);
+		       		ehistory.push_back(enew); 
+			}
+			energy=enew;  // Update for the next move
+			mx=mnewx;
+			my=mnewy;
+			mz=mnewz;
+		}
+		else if (i>nburn and i%nsites==0) // Update averages
+		{
+		       reject=reject+1;
+		       etot=etot+(energy);
+		       e2tot=e2tot+pow((energy),2.0);
+		       e4tot=e4tot+pow((energy),4.0);
+		       mx2tot=mx2tot+pow(mx,2.0);
+		       my2tot=my2tot+pow(my,2.0);
+		       mz2tot=mz2tot+pow(mz,2.0);
+		       mx4tot=mx4tot+pow(mx,4.0);
+		       my4tot=my4tot+pow(my,4.0);
+		       mz4tot=mz4tot+pow(mz,4.0);
+		       mxtot=mxtot+mx;
+		       mytot=mytot+my;
+		       mztot=mztot+mz;
+		       ehistory.push_back(energy); 
+		}
+		//if (i%100 ==0) ehistory.push_back(energy);  // Sample every 100th configuration of the energy to keep track 
+		
+	}
+	double nmeas=double(ehistory.size());
+	accept=accept/double(nsamples+nburn);
+	eavg=etot/double(nmeas);
+	e2avg=e2tot/double(nmeas);
+	e4avg=e4tot/double(nmeas);
+	mxavg=mxtot/double(nmeas);
+	myavg=mytot/double(nmeas);
+	mzavg=mztot/double(nmeas);
+	mx2avg=mx2tot/double(nmeas);
+	my2avg=my2tot/double(nmeas);
+	mz2avg=mz2tot/double(nmeas);
+	mx4avg=mx4tot/double(nmeas);
+	my4avg=my4tot/double(nmeas);
+	mz4avg=mz4tot/double(nmeas);
+	double spheat=(e2avg-(eavg*eavg))/(temp*temp);
+	double spheatpersite=(e2avg-(eavg*eavg))/(temp*temp*L*L*L);
+       
+	cout<<"accept = "<<boost::format("%+ .15f") %accept<<endl;
+	cout<<"mxavg  = "<<boost::format("%+ .15f") %mxavg<<endl;
+	cout<<"myavg  = "<<boost::format("%+ .15f") %myavg<<endl;
+	cout<<"mzavg  = "<<boost::format("%+ .15f") %mzavg<<endl;
+	cout<<"mx2avg = "<<boost::format("%+ .15f") %mx2avg<<endl;
+	cout<<"my2avg = "<<boost::format("%+ .15f") %my2avg<<endl;
+	cout<<"mz2avg = "<<boost::format("%+ .15f") %mz2avg<<endl;
+	cout<<"mx4avg = "<<boost::format("%+ .15f") %mx4avg<<endl;
+	cout<<"my4avg = "<<boost::format("%+ .15f") %my4avg<<endl;
+	cout<<"mz4avg = "<<boost::format("%+ .15f") %mz4avg<<endl;
+	cout<<"eavg   = "<<boost::format("%+ .15f") %eavg<<endl;
+	cout<<"e2avg  = "<<boost::format("%+ .15f") %e2avg<<endl;
+	cout<<"e4avg  = "<<boost::format("%+ .15f") %e4avg<<endl;
+	cout<<"Cv     = "<<boost::format("%+ .15f") %spheat<<endl;
+	cout<<"Cvps   = "<<boost::format("%+ .15f") %spheatpersite<<endl;
+	print_vec_acc(ehistory,true);
+}
+
