@@ -6,10 +6,7 @@
 
 // Hamiltonian
 #include"hamiltonian.h"
-#include"oleg.h"
 // MC
-#include"mc.h"
-#include"mc_finite_D.h"
 #include"mc_pyrochlore.h"
 #include"number_functions.h"
 using namespace std;
